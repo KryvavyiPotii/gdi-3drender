@@ -55,7 +55,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     case WM_PAINT:
     {
-        drawScene(hwnd);
+        // Get window dimensions.
+        RECT rect;
+
+        if (!GetWindowRect(hwnd, &rect))
+        {
+            showError(L"renderScene::GetWindowRect");
+            return -1;
+        }
+
+        int iWidth = rect.right - rect.left;
+        int iHeight = rect.bottom - rect.top;
+        
+        // Create scene.
+        Scene scene = createScene(iWidth, iHeight);
+
+        // Render created scene
+        renderScene(hwnd, &scene);
+
+        // Cleanup.
+        scene.clear();
+
         return 0;
     }
 
@@ -64,150 +84,117 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-int drawScene(HWND hwnd)
+Scene createScene(int screenWidth, int screenHeight)
 {
-    // Get window dimensions.
-    RECT rect;
-
-    if (!GetWindowRect(hwnd, &rect))
-    {
-        showError(L"drawScene::GetWindowRect");
-        return -1;
-    }
-
-    int iWidth = rect.right - rect.left;
-    int iHeight = rect.bottom - rect.top;
-
-    // Prepare for drawing.
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-
-    // Get light sources and objects.
-    std::vector<std::vector<Primitive*>*>* scene = createScene();
-    //std::vector<Light*>* lightSources = dynamic_cast<std::vector<Light*>*>(scene->at(0));
+    Scene scene;
 
     // Set camera.
-    Primitive camera;
+    Camera* camera = new Camera{
+        (float)screenWidth / 2,  // x
+        (float)-screenHeight,    // y
+        (float)screenHeight / 2, // z
+        screenWidth,             // screenWidth
+        screenHeight             // screenHeight
+    };
 
-    camera.x = iWidth / 2;
-    camera.y = -iHeight;
-    camera.z = iHeight / 2;
+    scene.setCamera(camera);
 
-    // Loop though every pixel.
-    for (int x = 0; x < iWidth; x++)
-    {
-        for (int y = 0; y < iHeight; y++)
-        {
-            // Create ray that goes through point {x, y}.
-            Vector ray;
-
-            ray.x = x - camera.x;
-            ray.y = -camera.y;
-            ray.z = y - camera.z;
-
-            for (Primitive* l : *(scene->at(0)))
-            {
-                Light* light = dynamic_cast<Light*>(l);
-
-                for (Primitive* o : *(scene->at(1)))
-                {
-                    Object* object = dynamic_cast<Object*>(o);
-
-                    // Check if ray intersects with sphere.
-                    float t = sphere.intersect(&ray);
-
-                    if (t != -1)
-                    {
-                        // Get intersection point.
-                        ray.x *= t;
-                        ray.y *= t;
-                        ray.z *= t;
-
-                        // Calculate light coefficient in intersection point.
-                        float l = light.countLight(&ray, &sphere);
-
-                        // Calculate color in intersection point based on light.
-                        COLORREF color = lightColor(&sphere, l);
-
-                        // Draw color.
-                        SetPixel(hdc, x, y, color);
-                    }
-                    else
-                    {
-                        // If ray doesn't intersect with sphere, draw background color.
-                        SetPixel(hdc, x, y, BG_COLOR);
-                    }
-                }
-            }
-        }
-    }
-
-    // Cleanup.
-    deleteScene(scene);
-    EndPaint(hwnd, &ps);
-
-    return 0;
-}
-
-std::vector<std::vector<Primitive*>*>* createScene()
-{
     // Create light sources.
-    Light* light = new Light;
+    Light* light1 = new Light{ -30, -30, -50, 0x00000077, 1 };
+    Light* light2 = new Light{ 30, 30, 50, 0x0000FF00, 0.5 };
 
-    light->x = -3;
-    light->y = 1;
-    light->z = 5;
-
-    std::vector<Primitive*>* lightSources = new std::vector<Primitive*>;
-
-    lightSources->push_back(light);
+    scene.addLight(light1);
+    scene.addLight(light2);
 
     // Create objects.
-    Sphere* sphere = new Sphere;
+    Sphere* sphere1 = new Sphere{ 0, 13, -1, 0x000000FF, 4 };
+    Sphere* sphere2 = new Sphere{ -12, 30, 5, 0x00FF3300, 4 };
+    Sphere* sphere3 = new Sphere{ 1, 5, -1, 0x0022FF55, 1 };
 
-    sphere->x = 10;
-    sphere->y = 13;
-    sphere->z = -1;
-    sphere->radius = 4;
-    sphere->color = 0x000000FF;
-
-    std::vector<Primitive*>* objects = new std::vector<Primitive*>;
-
-    objects->push_back(sphere);
-
-    // Store all primitives in one array (vector).
-    std::vector<std::vector<Primitive*>*>* scene = new std::vector<std::vector<Primitive*>*>;
-
-    // Format: scene[0] - array of lightsources, scene[i > 0] - anything.
-    scene->push_back(lightSources);
-    scene->push_back(objects);
+    scene.addObject(sphere1);
+    scene.addObject(sphere2);
+    scene.addObject(sphere3);
 
     return scene;
 }
 
-void deleteScene(std::vector<std::vector<Primitive*>*>* scene)
+int renderScene(HWND hwnd, Scene* scene)
 {
-    if (scene)
+    // Prepare for drawing.
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+
+    // Get scene parameters and parts.
+    Camera* camera = scene->getCamera();
+    std::vector<Light*> lightSources = scene->getLightSources();
+    std::vector<Object*> objects = scene->getObjects();
+
+    // Loop though every pixel.
+    for (int x = 0; x < camera->width; x++)
     {
-        // Free memory of all subarrays.
-        for (auto arr : *scene)
+        for (int y = 0; y < camera->height; y++)
         {
-            // Free memory of all primitives.
-            if (arr)
+            COLORREF pixelColor = BG_COLOR;
+            COLORREF lightColor = 0;
+
+            // Create ray that goes through point {x, y}.
+            Vector ray;
+
+            ray.x = x - camera->x;
+            ray.y = -camera->y;
+            ray.z = y - camera->z;
+
+            for (Light* light : lightSources)
             {
-                for (auto p : *arr)
+                float tMin = -1;
+
+                for (Object* object : objects)
                 {
-                    if (p) delete p;
+                    float t;
+
+                    // Typecast object.
+                    switch (object->id)
+                    {
+                    case ID_SPHERE:
+                    {
+                        Sphere* sphere = dynamic_cast<Sphere*>(object);
+
+                        // Check if ray intersects with sphere.
+                        t = sphere->intersect(&ray);
+
+                        break;
+                    }
+                    default:
+                        t = -1;
+                        break;
+                    }
+
+                    if ((t > 0) && (tMin < 0) || t <= tMin) 
+                    {
+                        tMin = t;
+
+                        // Get intersection point.
+                        Primitive point = { ray.x * tMin, ray.y * tMin, ray.z * tMin };
+
+                        // Calculate light coefficient in intersection point.
+                        float coefficient = light->countLight(&point, object);
+
+                        // Add light color to current pixel color.
+                        if (t == tMin) lightColor += light->lightColor(object, coefficient);
+                        else lightColor = light->lightColor(object, coefficient);
+                    }
                 }
             }
 
-            // Free memory of subarray.
-            delete arr;
+            // Dram pixel.
+            SetPixel(hdc, x, y, pixelColor + lightColor);
         }
-
-        // Free memory of array.
-        delete scene;
     }
+
+    // Cleanup.
+    EndPaint(hwnd, &ps);
+
+    return 0;
 }
 
 void showError(const std::wstring& wstrError)
