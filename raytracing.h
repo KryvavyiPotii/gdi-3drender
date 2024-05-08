@@ -11,6 +11,10 @@
 #define WINDOW_HEIGHT   480
 #define BG_COLOR        0x00000000  // pixel outside spheres are black
 
+// Object identifiers.
+#define ID_DEFAULT  1
+#define ID_SPHERE   2
+
 // Base class that represents point in space.
 class Primitive
 {
@@ -76,6 +80,7 @@ public:
 class Object : public Primitive
 {
 public:
+    int id = ID_DEFAULT;
     // Material parameters.
     COLORREF color;
 
@@ -104,8 +109,53 @@ public:
     }
 };
 
+// Class to store sphere info.
+class Sphere : public Object
+{
+public:
+    // Sphere parameters.
+    float radius;
+
+    Sphere()
+    {
+        id = ID_SPHERE;
+        x = y = z = color = radius = 0;
+    }
+    Sphere(float x1, float y1, float z1, COLORREF sphereColor, float sphereRadius)
+    {
+        id = ID_SPHERE;
+        x = x1;
+        y = y1;
+        z = z1;
+        color = sphereColor;
+        radius = sphereRadius;
+    }
+
+    float intersect(Vector* vector) override
+    {
+        // Calculate coefficients of vector and sphere intersection equation.
+        float a = vector->x * vector->x + vector->y * vector->y + vector->z * vector->z;
+        float b = -2 * (vector->x * x + vector->y * y + vector->z * z);
+        float c = x * x + y * y + z * z - radius * radius;
+
+        // Calculate discriminant.
+        float d = b * b - 4 * a * c;
+
+        // Find closest intersection point.
+        float t = -1;
+
+        if (d >= 0)
+        {
+            if (-b + std::sqrt(d) > 0) t = (-b + std::sqrt(d)) / (2 * a);
+            if (-b - std::sqrt(d) > 0) t = (-b - std::sqrt(d)) / (2 * a);
+        }
+
+        return t;
+    }
+};
+
 // Class to store light info.
-class Light : public Vector
+class Light : public Primitive
 {
 public:
     // Light parameters.
@@ -158,12 +208,12 @@ public:
 
         for (int i = 0; i <= 16; i += 8)
         {
-            // Get color channel.
-            char lightChannel = (color >> i) % 255;
-            char objectChannel = (object->color >> i) % 255;
+            // Get light and object color channels.
+            int lightChannel = (color >> i) % 256;
+            int objectChannel = (object->color >> i) % 256;
 
             // Create new color channel.
-            char newObjectChannel = std::round((lightChannel + objectChannel) * power * coefficient);
+            int newObjectChannel = (lightChannel + objectChannel) * power * coefficient;
 
             if (newObjectChannel > 0xFF) newObjectChannel = 0xFF;
 
@@ -172,49 +222,6 @@ public:
         }
 
         return newObjectColor;
-    }
-};
-
-// Class to store sphere info.
-class Sphere : public Object
-{
-public:
-    // Sphere parameters.
-    float radius;
-
-    Sphere()
-    {
-        x = y = z = color = radius = 0;
-    }
-    Sphere(float x1, float y1, float z1, COLORREF sphereColor, float sphereRadius)
-    {
-        x = x1;
-        y = y1;
-        z = z1;
-        color = sphereColor;
-        radius = sphereRadius;
-    }
-
-    float intersect(Vector* vector) override
-    {
-        // Calculate coefficients of vector and sphere intersection equation.
-        float a = vector->x * vector->x + vector->y * vector->y + vector->z * vector->z;
-        float b = -2 * (vector->x * x + vector->y * y + vector->z * z);
-        float c = x * x + y * y + z * z - radius * radius;
-
-        // Calculate discriminant.
-        float d = b * b - 4 * a * c;
-
-        // Find closest intersection point.
-        float t = -1;
-
-        if (d >= 0)
-        {
-            if (-b + std::sqrt(d) > 0) t = (-b + std::sqrt(d)) / (2 * a);
-            if (-b - std::sqrt(d) > 0) t = (-b - std::sqrt(d)) / (2 * a);
-        }
-
-        return t;
     }
 };
 
@@ -237,6 +244,21 @@ public:
         if (camera) delete camera;
 
         camera = newCamera;
+    }
+
+    Camera* getCamera()
+    {
+        return camera;
+    }
+
+    std::vector<Light*> getLightSources()
+    {
+        return lightSources;
+    }
+
+    std::vector<Object*> getObjects()
+    {
+        return objects;
     }
 
     void addLight(Light* light)
