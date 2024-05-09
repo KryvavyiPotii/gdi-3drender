@@ -54,27 +54,29 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_PAINT:
-    {
-        // Get window dimensions.
-        RECT rect;
+    {   
+        // Initialize rendering.
+        PAINTSTRUCT ps;
+        HDC hdc;
 
-        if (!GetWindowRect(hwnd, &rect))
+        Screen screen = initRender(hwnd, &ps, &hdc);
+
+        if (screen.height == 0 && screen.width == 0)
         {
-            showError(L"renderScene::GetWindowRect");
             return -1;
         }
 
-        int iWidth = rect.right - rect.left;
-        int iHeight = rect.bottom - rect.top;
-        
-        // Create scene.
-        Scene scene = createScene(iWidth, iHeight);
+        // Create a scene.
+        Scene scene = createScene(screen);
 
-        // Render created scene
-        renderScene(hwnd, &scene);
+        // Render the scene.
+        renderScene(&scene, hdc);
 
         // Cleanup.
         scene.clear();
+
+        // Shutdown rendering.
+        shutRender(hwnd, &ps);
 
         return 0;
     }
@@ -84,17 +86,47 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-Scene createScene(int screenWidth, int screenHeight)
+Screen initRender(HWND hwnd, PAINTSTRUCT* ps, HDC* hdc)
+{
+    // Prepare for drawing.
+    *hdc = BeginPaint(hwnd, ps);
+
+    if (!(*hdc))
+    {
+        showError(L"initRender::BeginPaint");
+        return { 0, 0 };
+    }
+
+    // Get window dimensions.
+    RECT rect;
+
+    if (!GetWindowRect(hwnd, &rect))
+    {
+        showError(L"initRender::GetWindowRect");
+        return { 0, 0 };
+    }
+
+    Screen screen(rect.right - rect.left, rect.bottom - rect.top);
+
+    return screen;
+}
+
+int shutRender(HWND hwnd, PAINTSTRUCT* ps)
+{
+    EndPaint(hwnd, ps);
+
+    return 0;
+}
+
+Scene createScene(Screen screen)
 {
     Scene scene;
 
-    // Set camera.
-    Screen screen = { screenWidth, screenHeight };
-
+    // Set a camera.
     Camera* camera = new Camera{
-        (float)screenWidth / 2,  // x
-        (float)-screenHeight,    // y
-        (float)screenHeight / 2, // z
+        (float)screen.width / 2,  // x
+        (float)-screen.height,    // y
+        (float)screen.height / 2, // z
         screen
     };
 
@@ -108,6 +140,7 @@ Scene createScene(int screenWidth, int screenHeight)
     scene.addLight(light2);
 
     // Create objects.
+    /*
     Sphere* sphere1 = new Sphere{ 0, 13, -1, 4, { 0x000000FF } };
     Sphere* sphere2 = new Sphere{ -12, 30, 5, 4, { 0x00FF3300 } };
     Sphere* sphere3 = new Sphere{ 1, 5, -1, 1, { 0x0022FF55 } };
@@ -115,16 +148,20 @@ Scene createScene(int screenWidth, int screenHeight)
     scene.addObject(sphere1);
     scene.addObject(sphere2);
     scene.addObject(sphere3);
+    */
+    Sphere* sphere1 = new Sphere{ 4, 13, 0, 2, { 0x000000FF } };
+    Sphere* sphere2 = new Sphere{ 3, 11, 3, 0.5, { 0x00FF0000 } };
+    Mirror* mirror = new Mirror{ -7, 20, 0, {-12, 1, 0}, 150 };
+
+    scene.addObject(sphere1);
+    scene.addObject(sphere2);
+    scene.addObject(mirror);
 
     return scene;
 }
 
-int renderScene(HWND hwnd, Scene* scene)
+int renderScene(Scene* scene, HDC hdc)
 {
-    // Prepare for drawing.
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-
     // Get scene parameters and parts.
     Camera* camera = scene->getCamera();
     Screen screen = camera->getScreen();
@@ -136,69 +173,117 @@ int renderScene(HWND hwnd, Scene* scene)
     {
         for (int y = 0; y < screen.height; y++)
         {
-            COLORREF pixelColor = BG_COLOR;
-            COLORREF lightColor = 0;
-            float tMin = -1;
-            Object* closestObject = NULL;
-
-            // Create ray that goes through point {x, y}.
+            // Create a ray that goes through the point {x, y}.
             Primitive ray = Primitive(x, 0, y) - *camera;
 
             // Find the closest object.
-            for (Object* object : objects)
+            float tMin = -1;
+            Object* closestObject = findClosest(&tMin, objects, &ray);
+            
+            // Check reflections and lighten the object.
+            COLORREF lightColor = 0;
+
+            if (closestObject)
             {
-                float t;
-
-                // Typecast object.
-                switch (object->getID())
+                if (closestObject->getID() == ID_MIRROR)
                 {
-                case ID_SPHERE:
-                {
-                    Sphere* sphere = dynamic_cast<Sphere*>(object);
+                    Mirror* mirror = dynamic_cast<Mirror*>(closestObject);
 
-                    // Check if ray intersects with sphere.
-                    t = sphere->intersect(&ray);
+                    // Get reflected ray.
+                    ray = mirror->reflect(&ray);
 
-                    break;
-                }
-                default:
-                    t = -1;
-                    break;
+                    // Find the closest object in reflection.
+                    closestObject = findClosest(&tMin, objects, &ray);
                 }
 
-                // Check if object is closer.
-                if ((tMin > t || tMin < 0) && t > 0)
-                {
-                    tMin = t;
-                    closestObject = object;
-                }
+                // Lighten the closest object.
+                lightColor = lighten(closestObject, lightSources, &ray, tMin);
             }
 
-            // Light the closest object.
-            for (Light* light : lightSources)
+            // Dram the pixel on the screen.
+            if (renderPixel(hdc, x, y, lightColor) < 0)
             {
-                if (closestObject)
-                {
-                    // Get intersection point.
-                    Primitive point = ray * tMin;
-
-                    // Calculate light coefficient in intersection point.
-                    float coefficient = light->countLight(&point, closestObject);
-
-                    // Add light color to current pixel color.
-                    lightColor += light->lightColor(closestObject, coefficient);
-                }
+                showError(L"renderScene::renderPixel");
+                return -1;
             }
-
-            // Dram pixel.
-            SetPixel(hdc, x, y, pixelColor + lightColor);
         }
     }
 
-    // Cleanup.
-    EndPaint(hwnd, &ps);
+    return 0;
+}
+
+int renderPixel(HDC hdc, int x, int y, COLORREF lightColor)
+{
+    COLORREF color = lightColor;
+
+    SetPixel(hdc, x, y, color);
 
     return 0;
+}
+
+Object* findClosest(float* tMin, std::vector<Object*> objects, Primitive* ray)
+{
+    Object* closestObject = NULL;
+
+    for (Object* object : objects)
+    {
+        float t;
+
+        // Typecast the object properly.
+        switch (object->getID())
+        {
+        case ID_SPHERE:
+        {
+            Sphere* sphere = dynamic_cast<Sphere*>(object);
+
+            t = sphere->intersect(ray);
+
+            break;
+        }
+        case ID_MIRROR:
+        {
+            Mirror* mirror = dynamic_cast<Mirror*>(object);
+
+            t = mirror->intersect(ray);
+
+            break;
+        }
+        default:
+            t = -1;
+            break;
+        }
+
+        // Check if the object is closer than the current one.
+        if ((*tMin > t || *tMin < 0) && t > 0)
+        {
+            *tMin = t;
+            closestObject = object;
+        }
+    }
+
+    return closestObject;
+}
+
+COLORREF lighten(Object* closestObject, std::vector<Light*> lightSources, Primitive* ray, float tMin)
+{
+    COLORREF lightColor = 0;
+
+    if (closestObject)
+    {
+        for (Light* light : lightSources)
+        {
+            // Get the intersection point.
+            Primitive point = *ray * tMin;
+
+            // Calculate light coefficient in the intersection point.
+            float coefficient = light->countLight(&point, closestObject);
+
+            // Add light color to the current pixel color.
+            lightColor += light->lightColor(closestObject, coefficient);
+        }
+    }
+
+    return lightColor;
 }
 
 void showError(const std::wstring& wstrError)
