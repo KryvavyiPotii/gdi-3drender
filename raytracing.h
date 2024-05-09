@@ -15,98 +15,165 @@
 #define ID_DEFAULT  1
 #define ID_SPHERE   2
 
-// Base class that represents point in space.
+// Struct that contains coordinates in 3D space.
+struct Coordinates3D
+{
+    float x = 0;
+    float y = 0;
+    float z = 0;
+};
+
+// Struct that contains data about object material.
+struct Material
+{
+    COLORREF color = BG_COLOR;
+};
+
+// Struct that contains data about screen.
+struct Screen
+{
+    int width = 0;
+    int height = 0;
+};
+
+// Base class that represents point/vector in space.
 class Primitive
 {
 public:
-    // Coordinates of point.
-    float x;
-    float y;
-    float z;
+    Primitive() {}
+    Primitive(float x, float y, float z) : coordinates({ x, y, z }) {}
 
-    Primitive()
+    Coordinates3D getCoordinates()
     {
-        x = y = z = 0;
+        return coordinates;
     }
-    Primitive(float x1, float y1, float z1)
+
+    void moveTo(float x, float y, float z)
     {
-        x = x1;
-        y = y1;
-        z = z1;
+        coordinates = { x, y, z };
     }
+
+    // Calculate vector length.
+    float length()
+    {
+        return std::sqrt(coordinates.x * coordinates.x
+            + coordinates.y * coordinates.y
+            + coordinates.z * coordinates.z);
+    }
+
+    // Subtract points/vectors.
+    Primitive operator-(Primitive point)
+    {
+        // Get vector coordinates.
+        Coordinates3D pCoordinates = point.getCoordinates();
+
+        return Primitive(
+            coordinates.x - pCoordinates.x,
+            coordinates.y - pCoordinates.y,
+            coordinates.z - pCoordinates.z
+        );
+    }
+
+    // Add points/vectors.
+    Primitive operator+(Primitive point)
+    {
+        // Get vector coordinates.
+        Coordinates3D pCoordinates = point.getCoordinates();
+
+        return Primitive(
+            coordinates.x + pCoordinates.x,
+            coordinates.y + pCoordinates.y,
+            coordinates.z + pCoordinates.z
+        );
+    }
+
+    // Multiply point/vector by scalar.
+    Primitive operator*(float t)
+    {
+        return Primitive(
+            coordinates.x * t,
+            coordinates.y * t,
+            coordinates.z * t
+        );
+    }
+
+    // Calculate dot product of current and passed vectors.
+    float operator*(Primitive vector)
+    {
+        Coordinates3D vCoordinates = vector.getCoordinates();
+        return coordinates.x * vCoordinates.x
+            + coordinates.y * vCoordinates.y
+            + coordinates.z * vCoordinates.z;
+    }
+
+protected:
+    // Coordinates of point.
+    Coordinates3D coordinates;
 };
 
 // Class that represents camera.
 class Camera : public Primitive
 {
 public:
-    int width;
-    int height;
-
-    Camera()
+    Camera() {}
+    Camera(float x, float y, float z, Screen cameraScreen)
     {
-        width = height = 0;
-    }
-    Camera(float x1, float y1, float z1, int screenWidth, int screenHeight)
-    {
-        x = x1;
-        y = y1;
-        z = z1;
-        width = screenWidth;
-        height = screenHeight;
-    }
-};
-
-// Base class that represents vector.
-class Vector : public Primitive
-{
-public:
-    using Primitive::Primitive;
-
-    // Calculate vector length.
-    virtual float length()
-    {
-        return std::sqrt(x * x + y * y + z * z);
+        coordinates = { x, y, z };
+        screen = cameraScreen;
     }
 
-    // Calculate dot product of current and passed vectors.
-    virtual float dot(Vector* vector)
+    Screen getScreen()
     {
-        return x * vector->x + y * vector->y + z * vector->z;
+        return screen;
     }
+
+private:
+    // Screen parameters.
+    Screen screen;
 };
 
 // Base class that represents 3D object.
 class Object : public Primitive
 {
 public:
-    int id = ID_DEFAULT;
-    // Material parameters.
-    COLORREF color;
-
-    Object()
+    Object() {}
+    Object(float x, float y, float z, Material objectMaterial)
     {
-        x = y = z = color = 0;
-    }
-    Object(float x1, float y1, float z1, COLORREF objectColor)
-    {
-        x = x1;
-        y = y1;
-        z = z1;
-        color = objectColor;
+        coordinates = { x, y, z };
+        material = objectMaterial;
     }
 
-    virtual float intersect(Vector* vector)
+    int getID()
     {
+        return id;
+    }
+
+    Material getMaterial()
+    {
+        return material;
+    }
+
+    // Find coefficient of intersection point between object and vector.
+    virtual float intersect(Primitive* vector)
+    {
+        // Get vector's coordinates.
+        Coordinates3D vCoordinates = vector->getCoordinates();
+
         // Calculate relation of Object's x and vector's x.
-        float t = x / vector->x;
+        float t = coordinates.x / vCoordinates.x;
 
         // Check if relation is the same for every coordinate.
         // If so, vector intersects with object.
-        if (t == y / vector->y && t == z / vector->z) return t;
+        if (t == coordinates.y / vCoordinates.y && t == coordinates.z / vCoordinates.z)
+            return t;
 
         return -1;
     }
+
+protected:
+    int id = ID_DEFAULT;
+    // Material parameters.
+    Material material;
 };
 
 // Class to store sphere info.
@@ -119,24 +186,31 @@ public:
     Sphere()
     {
         id = ID_SPHERE;
-        x = y = z = color = radius = 0;
+        radius = 0;
     }
-    Sphere(float x1, float y1, float z1, COLORREF sphereColor, float sphereRadius)
+    Sphere(float x, float y, float z, float sphereRadius, Material objectMaterial)
     {
         id = ID_SPHERE;
-        x = x1;
-        y = y1;
-        z = z1;
-        color = sphereColor;
+        coordinates = { x, y, z };
+        material = objectMaterial;
         radius = sphereRadius;
     }
 
-    float intersect(Vector* vector) override
+    float intersect(Primitive* vector) override
     {
+        // Get vector coordinates.
+        Coordinates3D vCoordinates = vector->getCoordinates();
+
         // Calculate coefficients of vector and sphere intersection equation.
-        float a = vector->x * vector->x + vector->y * vector->y + vector->z * vector->z;
-        float b = -2 * (vector->x * x + vector->y * y + vector->z * z);
-        float c = x * x + y * y + z * z - radius * radius;
+        float a = vCoordinates.x * vCoordinates.x
+            + vCoordinates.y * vCoordinates.y
+            + vCoordinates.z * vCoordinates.z;
+        float b = -2 * (vCoordinates.x * coordinates.x
+            + vCoordinates.y * coordinates.y
+            + vCoordinates.z * coordinates.z);
+        float c = coordinates.x * coordinates.x
+            + coordinates.y * coordinates.y
+            + coordinates.z * coordinates.z - radius * radius;
 
         // Calculate discriminant.
         float d = b * b - 4 * a * c;
@@ -146,8 +220,10 @@ public:
 
         if (d >= 0)
         {
-            if (-b + std::sqrt(d) > 0) t = (-b + std::sqrt(d)) / (2 * a);
-            if (-b - std::sqrt(d) > 0) t = (-b - std::sqrt(d)) / (2 * a);
+            if (-b + std::sqrt(d) > 0)
+                t = (-b + std::sqrt(d)) / (2 * a);
+            if (-b - std::sqrt(d) > 0)
+                t = (-b - std::sqrt(d)) / (2 * a);
         }
 
         return t;
@@ -158,19 +234,13 @@ public:
 class Light : public Primitive
 {
 public:
-    // Light parameters.
-    COLORREF color;
-    float power;
-
     Light()
     {
-        x = y = z = color = power = 0;
+        color = power = 0;
     }
-    Light(float x1, float y1, float z1, COLORREF lightColor, float lightPower)
+    Light(float x, float y, float z, COLORREF lightColor, float lightPower)
     {
-        x = x1;
-        y = y1;
-        z = z1;
+        coordinates = { x, y, z };
         color = lightColor;
         power = lightPower;
     }
@@ -179,21 +249,13 @@ public:
     float countLight(Primitive* objectPoint, Primitive* objectCenter)
     {
         // Get vector 1 that points from light source to point.
-        Vector lightToPoint;
-
-        lightToPoint.x = x - objectPoint->x;
-        lightToPoint.y = y - objectPoint->y;
-        lightToPoint.z = z - objectPoint->z;
+        Primitive lightToPoint = *this - *objectPoint;
 
         // Get vector 2 that points from point to sphere's center.
-        Vector pointToCenter;
-
-        pointToCenter.x = objectPoint->x - objectCenter->x;
-        pointToCenter.y = objectPoint->y - objectCenter->y;
-        pointToCenter.z = objectPoint->z - objectCenter->z;
+        Primitive pointToCenter = *objectPoint - *objectCenter;
 
         // Calculate cosine of angle between vector 1 and 2.
-        float cos = lightToPoint.dot(&pointToCenter) / (lightToPoint.length() * pointToCenter.length());
+        float cos = lightToPoint * pointToCenter / (lightToPoint.length() * pointToCenter.length());
 
         if (cos > 0 && cos < 1) return cos;
 
@@ -203,6 +265,8 @@ public:
     // Calculate color of object in light.
     COLORREF lightColor(Object* object, float coefficient)
     {
+        Material objectMaterial = object->getMaterial();
+
         // COLORREF (typedef DWORD) format: 0x00BBGGRR
         COLORREF newObjectColor = 0;
 
@@ -210,7 +274,7 @@ public:
         {
             // Get light and object color channels.
             int lightChannel = (color >> i) % 256;
-            int objectChannel = (object->color >> i) % 256;
+            int objectChannel = (objectMaterial.color >> i) % 256;
 
             // Create new color channel.
             int newObjectChannel = (lightChannel + objectChannel) * power * coefficient;
@@ -223,6 +287,11 @@ public:
 
         return newObjectColor;
     }
+
+private:
+    // Light parameters.
+    COLORREF color;
+    float power;
 };
 
 // Class that contains info about whole scene (light sources and objects).
@@ -292,8 +361,25 @@ private:
 };
 
 // Function prototypes.
+// Rendering window procedure.
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+// Create a scene to render.
+// Arguments:
+//     [in] screenWidth - rendering window width.
+//     [in] screenHeight - rendering window height.
+//         From camera's point of view a window it is a screen.
+// Return value:
+//     Scene object
 Scene createScene(int screenWidth, int screenHeight);
+// Render a scene.
+// Arguments:
+//     [in] hwnd - handle to rendering window.
+//     [in] scene - Scene object that should be rendered.
+// Return value:
+//     0 - success
+//     1 - failure
 int renderScene(HWND hwnd, Scene* scene);
+// Show error message box with error code.
+// Arguments:
+//     [in] wstrError - string to pring in message box.
 void showError(const std::wstring& wstrError);
-void showValue(const std::wstring& wstrName, auto aValue);
