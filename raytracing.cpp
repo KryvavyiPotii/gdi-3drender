@@ -89,27 +89,28 @@ Scene createScene(int screenWidth, int screenHeight)
     Scene scene;
 
     // Set camera.
+    Screen screen = { screenWidth, screenHeight };
+
     Camera* camera = new Camera{
         (float)screenWidth / 2,  // x
         (float)-screenHeight,    // y
         (float)screenHeight / 2, // z
-        screenWidth,             // screenWidth
-        screenHeight             // screenHeight
+        screen
     };
 
     scene.setCamera(camera);
 
     // Create light sources.
-    Light* light1 = new Light{ -30, -30, -50, 0x00000077, 1 };
-    Light* light2 = new Light{ 30, 30, 50, 0x0000FF00, 0.5 };
+    Light* light1 = new Light{ -30, -30, -50, { 0x00000077 }, 1 };
+    Light* light2 = new Light{ 30, 30, 50, { 0x0000FF00 }, 0.5 };
 
     scene.addLight(light1);
     scene.addLight(light2);
 
     // Create objects.
-    Sphere* sphere1 = new Sphere{ 0, 13, -1, 0x000000FF, 4 };
-    Sphere* sphere2 = new Sphere{ -12, 30, 5, 0x00FF3300, 4 };
-    Sphere* sphere3 = new Sphere{ 1, 5, -1, 0x0022FF55, 1 };
+    Sphere* sphere1 = new Sphere{ 0, 13, -1, 4, { 0x000000FF } };
+    Sphere* sphere2 = new Sphere{ -12, 30, 5, 4, { 0x00FF3300 } };
+    Sphere* sphere3 = new Sphere{ 1, 5, -1, 1, { 0x0022FF55 } };
 
     scene.addObject(sphere1);
     scene.addObject(sphere2);
@@ -126,63 +127,66 @@ int renderScene(HWND hwnd, Scene* scene)
 
     // Get scene parameters and parts.
     Camera* camera = scene->getCamera();
+    Screen screen = camera->getScreen();
     std::vector<Light*> lightSources = scene->getLightSources();
     std::vector<Object*> objects = scene->getObjects();
 
     // Loop though every pixel.
-    for (int x = 0; x < camera->width; x++)
+    for (int x = 0; x < screen.width; x++)
     {
-        for (int y = 0; y < camera->height; y++)
+        for (int y = 0; y < screen.height; y++)
         {
             COLORREF pixelColor = BG_COLOR;
             COLORREF lightColor = 0;
+            float tMin = -1;
+            Object* closestObject = NULL;
 
             // Create ray that goes through point {x, y}.
-            Vector ray;
+            Primitive ray = Primitive(x, 0, y) - *camera;
 
-            ray.x = x - camera->x;
-            ray.y = -camera->y;
-            ray.z = y - camera->z;
+            // Find the closest object.
+            for (Object* object : objects)
+            {
+                float t;
 
+                // Typecast object.
+                switch (object->getID())
+                {
+                case ID_SPHERE:
+                {
+                    Sphere* sphere = dynamic_cast<Sphere*>(object);
+
+                    // Check if ray intersects with sphere.
+                    t = sphere->intersect(&ray);
+
+                    break;
+                }
+                default:
+                    t = -1;
+                    break;
+                }
+
+                // Check if object is closer.
+                if ((tMin > t || tMin < 0) && t > 0)
+                {
+                    tMin = t;
+                    closestObject = object;
+                }
+            }
+
+            // Light the closest object.
             for (Light* light : lightSources)
             {
-                float tMin = -1;
-
-                for (Object* object : objects)
+                if (closestObject)
                 {
-                    float t;
+                    // Get intersection point.
+                    Primitive point = ray * tMin;
 
-                    // Typecast object.
-                    switch (object->id)
-                    {
-                    case ID_SPHERE:
-                    {
-                        Sphere* sphere = dynamic_cast<Sphere*>(object);
+                    // Calculate light coefficient in intersection point.
+                    float coefficient = light->countLight(&point, closestObject);
 
-                        // Check if ray intersects with sphere.
-                        t = sphere->intersect(&ray);
-
-                        break;
-                    }
-                    default:
-                        t = -1;
-                        break;
-                    }
-
-                    if ((t > 0) && (tMin < 0) || t <= tMin) 
-                    {
-                        tMin = t;
-
-                        // Get intersection point.
-                        Primitive point = { ray.x * tMin, ray.y * tMin, ray.z * tMin };
-
-                        // Calculate light coefficient in intersection point.
-                        float coefficient = light->countLight(&point, object);
-
-                        // Add light color to current pixel color.
-                        if (t == tMin) lightColor += light->lightColor(object, coefficient);
-                        else lightColor = light->lightColor(object, coefficient);
-                    }
+                    // Add light color to current pixel color.
+                    lightColor += light->lightColor(closestObject, coefficient);
                 }
             }
 
@@ -207,15 +211,4 @@ void showError(const std::wstring& wstrError)
     std::wstring wstr = wsstr.str();
 
     MessageBox(NULL, wstr.c_str(), L"Error", MB_OK);
-}
-
-void showValue(const std::wstring& wstrName, auto aValue)
-{
-    std::wstringstream wssValue;
-
-    wssValue << aValue << std::endl;
-
-    std::wstring wsValue = wssValue.str();
-
-    MessageBox(NULL, wsValue.c_str(), wstrName.c_str(), 0);
 }
