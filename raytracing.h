@@ -14,6 +14,7 @@
 // Object identifiers.
 #define ID_DEFAULT  1
 #define ID_SPHERE   2
+#define ID_MIRROR   3
 
 // Struct that contains coordinates in 3D space.
 struct Coordinates3D
@@ -23,20 +24,20 @@ struct Coordinates3D
     float z = 0;
 };
 
-// Struct that contains data about object material.
+// Struct that contains data about an object material.
 struct Material
 {
     COLORREF color = BG_COLOR;
 };
 
-// Struct that contains data about screen.
+// Struct that contains data about a screen.
 struct Screen
 {
     int width = 0;
     int height = 0;
 };
 
-// Base class that represents point/vector in space.
+// Base class that represents a point/vector in space.
 class Primitive
 {
 public:
@@ -53,7 +54,7 @@ public:
         coordinates = { x, y, z };
     }
 
-    // Calculate vector length.
+    // Calculate vector's length.
     float length()
     {
         return std::sqrt(coordinates.x * coordinates.x
@@ -87,7 +88,7 @@ public:
         );
     }
 
-    // Multiply point/vector by scalar.
+    // Multiply the point/vector by a scalar.
     Primitive operator*(float t)
     {
         return Primitive(
@@ -97,7 +98,7 @@ public:
         );
     }
 
-    // Calculate dot product of current and passed vectors.
+    // Calculate a dot product of the current and passed vectors.
     float operator*(Primitive vector)
     {
         Coordinates3D vCoordinates = vector.getCoordinates();
@@ -107,11 +108,11 @@ public:
     }
 
 protected:
-    // Coordinates of point.
+    // Coordinates of the point/vector.
     Coordinates3D coordinates;
 };
 
-// Class that represents camera.
+// Class that represents a camera.
 class Camera : public Primitive
 {
 public:
@@ -132,7 +133,7 @@ private:
     Screen screen;
 };
 
-// Base class that represents 3D object.
+// Base class that represents a 3D object.
 class Object : public Primitive
 {
 public:
@@ -143,27 +144,21 @@ public:
         material = objectMaterial;
     }
 
-    int getID()
-    {
-        return id;
-    }
+    int getID() { return id; }
 
-    Material getMaterial()
-    {
-        return material;
-    }
+    Material getMaterial() { return material; }
 
-    // Find coefficient of intersection point between object and vector.
+    // Find the coefficient of intersection point between the object and a vector.
     virtual float intersect(Primitive* vector)
     {
         // Get vector's coordinates.
         Coordinates3D vCoordinates = vector->getCoordinates();
 
-        // Calculate relation of Object's x and vector's x.
+        // Calculate the relation of Object's x and vector's x.
         float t = coordinates.x / vCoordinates.x;
 
-        // Check if relation is the same for every coordinate.
-        // If so, vector intersects with object.
+        // Check if the relation is the same for every coordinate.
+        // If so, the vector intersects with the object.
         if (t == coordinates.y / vCoordinates.y && t == coordinates.z / vCoordinates.z)
             return t;
 
@@ -176,13 +171,65 @@ protected:
     Material material;
 };
 
-// Class to store sphere info.
+// Class that represents a round reflective surface.
+class Mirror : public Object
+{
+public:
+    Mirror()
+    {
+        id = ID_MIRROR;
+        radius = 0;
+    }
+    Mirror(float x, float y, float z, Primitive normalVector, float mirrorRadius)
+    {
+        id = ID_MIRROR;
+        coordinates = { x, y, z };
+        radius = mirrorRadius;
+
+        // Normalize the vector.
+        normal = normalVector * (1 / normalVector.length());
+    }
+
+    float intersect(Primitive* vector) override
+    {
+        // Find the closest intersection point from the intersection equation.
+        // Mirror origin: { x0, y0, z0 }
+        // Vector: { x, y, z }
+        // Normal vector: { A, B, C }
+        // Mirror surface: A(x0 - x*t) + B(y0 - y*t) + C(z0 - z*t) = 0
+        // Intersection point: { x*t, y*t, z*t }
+
+        // Get required coordinates.
+        Coordinates3D nc = normal.getCoordinates();
+        Coordinates3D vc = vector->getCoordinates();
+
+        // Calculate the coefficient and find the intersection point.
+        float t = (nc.x * coordinates.x + nc.y * coordinates.y + nc.z * coordinates.z)
+            / (nc.x * vc.x + nc.y * vc.y + nc.z * vc.z);
+
+        Primitive intersection = *vector * t;
+
+        // Check if the intersection point lies on mirror.
+        if (intersection.length() > radius) return -1;
+
+        return t;
+    }
+
+    Primitive reflect(Primitive* vector)
+    {
+        return *vector - (normal * (*vector * normal)) * 2;
+    }
+
+private:
+    // Normal vector that sets the direction.
+    Primitive normal;
+    float radius;
+};
+
+// Class that represents a sphere object.
 class Sphere : public Object
 {
 public:
-    // Sphere parameters.
-    float radius;
-
     Sphere()
     {
         id = ID_SPHERE;
@@ -198,10 +245,13 @@ public:
 
     float intersect(Primitive* vector) override
     {
-        // Get vector coordinates.
+        // Get vector's coordinates.
         Coordinates3D vCoordinates = vector->getCoordinates();
 
-        // Calculate coefficients of vector and sphere intersection equation.
+        // Calculate the coefficients of the intersection equation.
+        // Sphere: x^2 + y^2 + z^2 = R^2
+        // Vector: { x, y, z }
+        // Intersection point: { x*t, y*t, z*t }
         float a = vCoordinates.x * vCoordinates.x
             + vCoordinates.y * vCoordinates.y
             + vCoordinates.z * vCoordinates.z;
@@ -212,10 +262,10 @@ public:
             + coordinates.y * coordinates.y
             + coordinates.z * coordinates.z - radius * radius;
 
-        // Calculate discriminant.
+        // Calculate the discriminant.
         float d = b * b - 4 * a * c;
 
-        // Find closest intersection point.
+        // Find the closest intersection point.
         float t = -1;
 
         if (d >= 0)
@@ -228,9 +278,13 @@ public:
 
         return t;
     }
+
+private:
+    // Sphere parameters.
+    float radius;
 };
 
-// Class to store light info.
+// Class that represents point light.
 class Light : public Primitive
 {
 public:
@@ -248,13 +302,13 @@ public:
     // Calculate exposure of object's point to light.
     float countLight(Primitive* objectPoint, Primitive* objectCenter)
     {
-        // Get vector 1 that points from light source to point.
+        // Create the vector that points from the light source to a point.
         Primitive lightToPoint = *this - *objectPoint;
 
-        // Get vector 2 that points from point to sphere's center.
+        // Create the vector that points from the point to sphere's center.
         Primitive pointToCenter = *objectPoint - *objectCenter;
 
-        // Calculate cosine of angle between vector 1 and 2.
+        // Calculate cosine of angle between created vectors.
         float cos = lightToPoint * pointToCenter / (lightToPoint.length() * pointToCenter.length());
 
         if (cos > 0 && cos < 1) return cos;
@@ -262,7 +316,7 @@ public:
         return 0;
     }
 
-    // Calculate color of object in light.
+    // Calculate the color of an object in light.
     COLORREF lightColor(Object* object, float coefficient)
     {
         Material objectMaterial = object->getMaterial();
@@ -276,12 +330,12 @@ public:
             int lightChannel = (color >> i) % 256;
             int objectChannel = (objectMaterial.color >> i) % 256;
 
-            // Create new color channel.
+            // Create a new color channel.
             int newObjectChannel = (lightChannel + objectChannel) * power * coefficient;
 
             if (newObjectChannel > 0xFF) newObjectChannel = 0xFF;
 
-            // Add new color channel to final color.
+            // Add the color channel to final color.
             newObjectColor |= newObjectChannel << i;
         }
 
@@ -294,7 +348,7 @@ private:
     float power;
 };
 
-// Class that contains info about whole scene (light sources and objects).
+// Class that contains the whole scene (light sources and objects).
 class Scene
 {
 public:
@@ -315,46 +369,28 @@ public:
         camera = newCamera;
     }
 
-    Camera* getCamera()
-    {
-        return camera;
-    }
+    Camera* getCamera() { return camera; }
 
-    std::vector<Light*> getLightSources()
-    {
-        return lightSources;
-    }
+    std::vector<Light*> getLightSources() { return lightSources; }
 
-    std::vector<Object*> getObjects()
-    {
-        return objects;
-    }
+    std::vector<Object*> getObjects() { return objects; }
 
-    void addLight(Light* light)
-    {
-        lightSources.push_back(light);
-    }
+    void addLight(Light* light) { lightSources.push_back(light); }
 
-    void addObject(Object* object)
-    {
-        objects.push_back(object);
-    }
+    void addObject(Object* object) { objects.push_back(object); }
 
     // Free all memory.
     void clear()
     {
         for (Light* l : lightSources)
-        {
             if (l) delete l;
-        }
 
         for (Object* o : objects)
-        {
             if (o) delete o;
-        }
     }
 
 private:
+    // Scene parts.
     Camera* camera;
     std::vector<Light*> lightSources;
     std::vector<Object*> objects;
@@ -363,23 +399,64 @@ private:
 // Function prototypes.
 // Rendering window procedure.
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+// Initialize rendering.
+// Return value:
+//     Screen object.
+Screen initRender(
+    HWND hwnd,       // [in] handle to the rendering window.
+    PAINTSTRUCT* ps, // [in, out] pointer to PAINTSTRUCT used for rendering.
+    HDC* hdc         // [in, out] pointer to HDC used for rendering.
+);
+// Shutdown rendering.
+// Return value:
+//     0 - success.
+//     1 - failure.
+int shutRender(
+    HWND hwnd,      // [in] handle to the rendering window.
+    PAINTSTRUCT* ps // [in] pointer to PAINTSTRUCT used for rendering.
+);
 // Create a scene to render.
-// Arguments:
-//     [in] screenWidth - rendering window width.
-//     [in] screenHeight - rendering window height.
-//         From camera's point of view a window it is a screen.
 // Return value:
-//     Scene object
-Scene createScene(int screenWidth, int screenHeight);
+//     Scene object.
+Scene createScene(
+    Screen screen   // [in] screen parameters for a camera setup.
+);
 // Render a scene.
-// Arguments:
-//     [in] hwnd - handle to rendering window.
-//     [in] scene - Scene object that should be rendered.
 // Return value:
-//     0 - success
-//     1 - failure
-int renderScene(HWND hwnd, Scene* scene);
+//     0 - success.
+//     1 - failure.
+int renderScene(
+    Scene* scene,   // [in] scene that should be rendered.
+    HDC hdc         // [in] initialized structure for rendering.
+);
+// Render pixel with provided color.
+// Return value:
+//     0 - success.
+//     1 - failure.
+int renderPixel(
+    HDC hdc,            // [in] HDC used for rendering.
+    int x,              // [in] horizontal position of the pixel.
+    int y,              // [in] vertical position of the pixel.
+    COLORREF lightColor // [in] color of the pixel.
+);
+// Find closest object to the camera.
+// Return value:
+//     Pointer to Object.
+Object* findClosest(
+    float* tMin,                    // [in, out] pointer to the coefficient of proximity.
+    std::vector<Object*> objects,   // [in] array of objects in the scene.
+    Primitive* ray                  // [in] ray whose interception points we are searching.
+);
+// Set color to the closest object according to lighting of the scene.
+// Return value:
+//     COLORREF color.
+COLORREF lighten(
+    Object* closestObject,            // [in] pointer to the closest object.
+    std::vector<Light*> lightSources, // [in] array of light sources in the scene.
+    Primitive* ray,                   // [in] ray whose interception points we are searching.
+    float tMin                        // [in] coefficient of proximity.
+);
 // Show error message box with error code.
-// Arguments:
-//     [in] wstrError - string to pring in message box.
-void showError(const std::wstring& wstrError);
+void showError(
+    const std::wstring& wstrError   // [in] string to pring in message box.
+);
